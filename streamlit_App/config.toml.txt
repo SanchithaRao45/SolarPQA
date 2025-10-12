@@ -1,0 +1,3 @@
+[runtime]
+# Use a stable Python version to ensure compatibility with scikit-learn/TensorFlow
+python_version = "3.11"
