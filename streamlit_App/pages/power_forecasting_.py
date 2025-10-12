@@ -1,7 +1,7 @@
 """
-Solar Power Forecasting System - ML Model & Streamlit App
+Solar Power Forecasting System - Single Screen Dashboard
 5KW Rooftop System with 85% Efficiency
-Uses NASA POWER API for weather data
+Real-time monitoring with NASA POWER API
 """
 
 import streamlit as st
@@ -11,13 +11,8 @@ from datetime import datetime, timedelta
 import requests
 import plotly.graph_objects as go
 import plotly.express as px
-from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
-import joblib
-import warnings
-warnings.filterwarnings('ignore')
+from plotly.subplots import make_subplots
+import time
 
 # ==================== CONFIGURATION ====================
 SYSTEM_CAPACITY = 5.0  # kW
@@ -28,28 +23,29 @@ BENGALURU_LAT = 12.9716
 BENGALURU_LON = 77.5946
 
 # BESCOM Tariff 2024-25 (Residential)
-BESCOM_TARIFF = {
-    'slab1': {'limit': 50, 'rate': 4.15},
-    'slab2': {'limit': 100, 'rate': 5.75},
-    'slab3': {'limit': 200, 'rate': 7.60},
-    'slab4': {'limit': float('inf'), 'rate': 8.75}
-}
+BESCOM_TARIFF = [
+    {'limit': 50, 'rate': 4.15},
+    {'limit': 100, 'rate': 5.75},
+    {'limit': 200, 'rate': 7.60},
+    {'limit': float('inf'), 'rate': 8.75}
+]
 
 # ==================== NASA POWER API ====================
+@st.cache_data(ttl=3600)
 def fetch_nasa_power_data(lat, lon, start_date, end_date):
     """Fetch solar irradiance and weather data from NASA POWER API"""
     
     base_url = "https://power.larc.nasa.gov/api/temporal/daily/point"
     
     parameters = [
-        "ALLSKY_SFC_SW_DWN",  # Solar irradiance
-        "T2M",  # Temperature at 2m
+        "ALLSKY_SFC_SW_DWN",  # Solar irradiance (W/m²)
+        "T2M",  # Temperature at 2m (°C)
         "T2M_MAX",  # Max temperature
         "T2M_MIN",  # Min temperature
-        "RH2M",  # Relative humidity
-        "WS2M",  # Wind speed at 2m
-        "PRECTOTCORR",  # Precipitation
-        "CLOUD_AMT"  # Cloud amount
+        "RH2M",  # Relative humidity (%)
+        "WS2M",  # Wind speed at 2m (m/s)
+        "PRECTOTCORR",  # Precipitation (mm)
+        "CLOUD_AMT"  # Cloud amount (%)
     ]
     
     params = {
@@ -70,472 +66,565 @@ def fetch_nasa_power_data(lat, lon, start_date, end_date):
         # Convert to DataFrame
         df = pd.DataFrame(data['properties']['parameter'])
         df.index = pd.to_datetime(df.index, format='%Y%m%d')
-        df = df.replace(-999, np.nan)  # Replace missing values
-        df = df.fillna(method='ffill').fillna(method='bfill')
+        df = df.replace(-999, np.nan)
+        df = df.ffill().bfill()  # Forward and backward fill
         
         return df
     
     except Exception as e:
-        st.error(f"Error fetching NASA POWER data: {str(e)}")
+        st.error(f"❌ Error fetching NASA POWER data: {str(e)}")
         return None
 
-# ==================== FEATURE ENGINEERING ====================
-def engineer_features(df):
-    """Create features for ML model"""
-    
-    df = df.copy()
-    
-    # Time-based features
-    df['month'] = df.index.month
-    df['day_of_year'] = df.index.dayofyear
-    df['season'] = df['month'].apply(lambda x: 
-        'winter' if x in [12, 1, 2] else
-        'summer' if x in [3, 4, 5] else
-        'monsoon' if x in [6, 7, 8, 9] else 'post_monsoon'
-    )
-    
-    # Cyclical encoding for time features
-    df['month_sin'] = np.sin(2 * np.pi * df['month'] / 12)
-    df['month_cos'] = np.cos(2 * np.pi * df['month'] / 12)
-    df['day_sin'] = np.sin(2 * np.pi * df['day_of_year'] / 365)
-    df['day_cos'] = np.cos(2 * np.pi * df['day_of_year'] / 365)
-    
-    # Weather interaction features
-    df['temp_irradiance'] = df['T2M'] * df['ALLSKY_SFC_SW_DWN']
-    df['humidity_temp'] = df['RH2M'] * df['T2M']
-    df['cloud_irradiance'] = df['CLOUD_AMT'] * df['ALLSKY_SFC_SW_DWN']
-    
-    # Rolling averages
-    df['irradiance_ma3'] = df['ALLSKY_SFC_SW_DWN'].rolling(window=3, min_periods=1).mean()
-    df['irradiance_ma7'] = df['ALLSKY_SFC_SW_DWN'].rolling(window=7, min_periods=1).mean()
-    df['temp_ma3'] = df['T2M'].rolling(window=3, min_periods=1).mean()
-    
-    # Temperature effect on efficiency
-    df['temp_efficiency_factor'] = 1 + TEMPERATURE_COEFFICIENT * (df['T2M'] - 25)
-    
-    return df
-
 # ==================== POWER CALCULATION ====================
-def calculate_power_output(irradiance, temperature, cloud_cover, humidity):
-    """Calculate theoretical power output based on weather conditions"""
+def calculate_power_output(irradiance, temperature, cloud_cover, humidity, wind_speed):
+    """Calculate realistic power output based on weather conditions"""
     
-    # Base power from irradiance (W/m²)
+    # Base power from irradiance (Standard Test Conditions: 1000 W/m²)
+    if irradiance < 50:  # Too low irradiance
+        return 0
+    
     base_power = (irradiance / 1000) * SYSTEM_CAPACITY
     
     # Apply system efficiency
     power = base_power * SYSTEM_EFFICIENCY
     
-    # Temperature derating
+    # Temperature derating (efficiency decreases with temperature)
     temp_factor = 1 + TEMPERATURE_COEFFICIENT * (temperature - 25)
-    power *= temp_factor
+    power *= max(temp_factor, 0.7)  # Minimum 70% efficiency
     
-    # Cloud cover effect
-    cloud_factor = 1 - (cloud_cover / 100) * 0.7
-    power *= cloud_factor
+    # Cloud cover effect (exponential reduction)
+    cloud_factor = 1 - (cloud_cover / 100) * 0.75
+    power *= max(cloud_factor, 0.1)
     
-    # Humidity effect
-    humidity_factor = 1 - (max(0, humidity - 60) / 100) * 0.1
-    power *= humidity_factor
+    # Humidity effect (high humidity reduces efficiency slightly)
+    if humidity > 60:
+        humidity_factor = 1 - ((humidity - 60) / 200)
+        power *= max(humidity_factor, 0.85)
     
-    return max(0, power)
-
-# ==================== TRAINING DATA GENERATION ====================
-def generate_training_data(df):
-    """Generate power output labels for training"""
+    # Wind cooling effect (positive impact at high temps)
+    if temperature > 35 and wind_speed > 3:
+        wind_cooling = 1 + (wind_speed * 0.01)
+        power *= min(wind_cooling, 1.05)
     
-    df = df.copy()
-    
-    df['power_output'] = df.apply(
-        lambda row: calculate_power_output(
-            row['ALLSKY_SFC_SW_DWN'],
-            row['T2M'],
-            row['CLOUD_AMT'],
-            row['RH2M']
-        ),
-        axis=1
-    )
-    
-    # Add variation
-    np.random.seed(42)
-    df['power_output'] *= np.random.uniform(0.95, 1.05, size=len(df))
-    
-    # Calculate daily energy (kWh) - 6 hours of effective sunlight
-    df['daily_energy'] = df['power_output'] * 6
-    
-    return df
-
-# ==================== ML MODEL ====================
-class SolarPowerForecaster:
-    """ML Model for Solar Power Forecasting"""
-    
-    def __init__(self):
-        self.model = GradientBoostingRegressor(
-            n_estimators=200,
-            max_depth=5,
-            learning_rate=0.1,
-            random_state=42
-        )
-        self.scaler = StandardScaler()
-        self.feature_cols = None
-        self.is_trained = False
-        
-    def prepare_features(self, df):
-        """Prepare features for model"""
-        
-        feature_cols = [
-            'ALLSKY_SFC_SW_DWN', 'T2M', 'T2M_MAX', 'T2M_MIN',
-            'RH2M', 'WS2M', 'CLOUD_AMT',
-            'month_sin', 'month_cos', 'day_sin', 'day_cos',
-            'temp_irradiance', 'humidity_temp', 'cloud_irradiance',
-            'irradiance_ma3', 'irradiance_ma7', 'temp_ma3',
-            'temp_efficiency_factor'
-        ]
-        
-        return df[feature_cols]
-    
-    def train(self, df):
-        """Train the model"""
-        
-        X = self.prepare_features(df)
-        y = df['power_output']
-        
-        self.feature_cols = X.columns.tolist()
-        
-        # Split data
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=0.2, random_state=42, shuffle=False
-        )
-        
-        # Scale features
-        X_train_scaled = self.scaler.fit_transform(X_train)
-        X_test_scaled = self.scaler.transform(X_test)
-        
-        # Train model
-        self.model.fit(X_train_scaled, y_train)
-        
-        # Evaluate
-        y_pred = self.model.predict(X_test_scaled)
-        
-        metrics = {
-            'rmse': np.sqrt(mean_squared_error(y_test, y_pred)),
-            'mae': mean_absolute_error(y_test, y_pred),
-            'r2': r2_score(y_test, y_pred),
-            'mape': np.mean(np.abs((y_test - y_pred) / (y_test + 1e-10))) * 100
-        }
-        
-        self.is_trained = True
-        
-        return metrics, X_test, y_test, y_pred
-    
-    def predict(self, df):
-        """Make predictions"""
-        
-        if not self.is_trained:
-            raise ValueError("Model not trained yet!")
-        
-        X = self.prepare_features(df)
-        X_scaled = self.scaler.transform(X)
-        predictions = self.model.predict(X_scaled)
-        
-        return predictions
-    
-    def get_feature_importance(self):
-        """Get feature importance"""
-        
-        if not self.is_trained:
-            return None
-        
-        importance_df = pd.DataFrame({
-            'feature': self.feature_cols,
-            'importance': self.model.feature_importances_
-        }).sort_values('importance', ascending=False)
-        
-        return importance_df
+    return max(0, min(power, SYSTEM_CAPACITY))
 
 # ==================== PERFORMANCE RATIO ====================
-def calculate_pr_ratio(actual_energy, irradiance, system_capacity):
+def calculate_pr_ratio(actual_power, irradiance):
     """Calculate Performance Ratio"""
     
-    theoretical_energy = (irradiance / 1000) * system_capacity * 6
+    theoretical_power = (irradiance / 1000) * SYSTEM_CAPACITY * SYSTEM_EFFICIENCY
     
-    if theoretical_energy == 0:
+    if theoretical_power == 0:
         return 0
     
-    pr = (actual_energy / theoretical_energy) * 100
+    pr = (actual_power / theoretical_power) * 100
     return min(pr, 100)
 
 # ==================== CONDITION CLASSIFICATION ====================
 def classify_condition(irradiance, cloud_cover, precipitation):
-    """Classify weather condition"""
+    """Classify weather condition with emoji"""
     
     if precipitation > 5:
-        return "Rainy", "🌧️"
+        return "Rainy", "🌧️", "#4A90E2"
     elif cloud_cover > 75:
-        return "Heavy Clouds", "☁️"
+        return "Heavy Clouds", "☁️", "#95A5A6"
     elif cloud_cover > 50:
-        return "Cloudy", "⛅"
+        return "Cloudy", "⛅", "#BDC3C7"
     elif cloud_cover > 25:
-        return "Partly Cloudy", "🌤️"
+        return "Partly Cloudy", "🌤️", "#F39C12"
     elif irradiance > 600:
-        return "Sunny", "☀️"
+        return "Sunny", "☀️", "#F1C40F"
     else:
-        return "Clear", "🌞"
+        return "Clear", "🌞", "#E67E22"
 
 # ==================== COST CALCULATION ====================
 def calculate_savings(daily_energy_kwh):
     """Calculate cost savings based on BESCOM tariff"""
     
     monthly_energy = daily_energy_kwh * 30
+    yearly_energy = daily_energy_kwh * 365
     
+    # Calculate monthly cost
     total_cost = 0
     remaining_energy = monthly_energy
     
-    for slab in ['slab1', 'slab2', 'slab3', 'slab4']:
-        slab_limit = BESCOM_TARIFF[slab]['limit']
-        slab_rate = BESCOM_TARIFF[slab]['rate']
-        
+    for i, slab in enumerate(BESCOM_TARIFF):
         if remaining_energy <= 0:
             break
         
-        energy_in_slab = min(remaining_energy, slab_limit if slab != 'slab4' else remaining_energy)
-        total_cost += energy_in_slab * slab_rate
+        if i == 0:
+            prev_limit = 0
+        else:
+            prev_limit = BESCOM_TARIFF[i-1]['limit']
+        
+        slab_energy = slab['limit'] - prev_limit if slab['limit'] != float('inf') else remaining_energy
+        energy_in_slab = min(remaining_energy, slab_energy)
+        
+        total_cost += energy_in_slab * slab['rate']
         remaining_energy -= energy_in_slab
     
     return {
-        'daily_savings': (daily_energy_kwh * 6.5),
+        'daily_savings': daily_energy_kwh * 6.5,  # Average rate
         'monthly_savings': total_cost,
         'yearly_savings': total_cost * 12,
-        'monthly_energy': monthly_energy
+        'monthly_energy': monthly_energy,
+        'yearly_energy': yearly_energy
     }
+
+# ==================== GENERATE HOURLY DATA ====================
+def generate_hourly_profile(daily_data):
+    """Generate realistic hourly power profile for today"""
+    
+    hours = list(range(24))
+    hourly_power = []
+    
+    # Sun profile (bell curve from 6 AM to 6 PM)
+    for hour in hours:
+        if 6 <= hour <= 18:
+            # Peak at noon (12)
+            normalized_hour = (hour - 12) / 6
+            sun_intensity = np.exp(-0.5 * (normalized_hour ** 2))
+            
+            # Apply weather conditions
+            power = daily_data['power_output'] * sun_intensity
+            hourly_power.append(power)
+        else:
+            hourly_power.append(0)
+    
+    return pd.DataFrame({
+        'hour': hours,
+        'power': hourly_power
+    })
 
 # ==================== STREAMLIT APP ====================
 def main():
+   
     
+    # Custom CSS
+    st.markdown("""
+        <style>
+        .main-header {
+            font-size: 3rem;
+            font-weight: bold;
+            text-align: center;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 0;
+        }
+        .sub-header {
+            text-align: center;
+            color: #7f8c8d;
+            margin-top: 0;
+        }
+        .metric-box {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px;
+            border-radius: 10px;
+            color: white;
+            text-align: center;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        .metric-value {
+            font-size: 2rem;
+            font-weight: bold;
+        }
+        .metric-label {
+            font-size: 0.9rem;
+            opacity: 0.9;
+        }
+        .status-badge {
+            display: inline-block;
+            padding: 10px 20px;
+            border-radius: 20px;
+            font-weight: bold;
+            font-size: 1.2rem;
+        }
+        </style>
+    """, unsafe_allow_html=True)
     
-    st.title("☀️ Solar Power Forecasting System")
-    st.markdown("### 5KW Rooftop System - ML-Based Prediction with NASA POWER API")
+    # Header
+    st.markdown('<h1 class="main-header">☀️ Solar Power Forecasting System</h1>', unsafe_allow_html=True)
+    st.markdown('<p class="sub-header">5KW Rooftop System | 85% Efficiency | Real-time NASA POWER API Integration</p>', unsafe_allow_html=True)
     
-    # Sidebar
-    with st.sidebar:
-        st.header("⚙️ System Configuration")
-        st.metric("System Capacity", f"{SYSTEM_CAPACITY} kW")
-        st.metric("System Efficiency", f"{SYSTEM_EFFICIENCY * 100}%")
-        st.metric("Panel Area", f"{PANEL_AREA} m²")
+    # Auto-refresh toggle
+    col_refresh1, col_refresh2, col_refresh3 = st.columns([2, 1, 2])
+    with col_refresh2:
+        auto_refresh = st.checkbox("🔄 Auto-refresh (30s)", value=False)
+    
+    st.markdown("---")
+    
+    # Fetch data
+    with st.spinner("📡 Fetching real-time data from NASA POWER API..."):
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=30)
         
-        st.markdown("---")
-        st.header("📍 Location")
-        st.write(f"Latitude: {BENGALURU_LAT}")
-        st.write(f"Longitude: {BENGALURU_LON}")
+        data = fetch_nasa_power_data(BENGALURU_LAT, BENGALURU_LON, start_date, end_date)
         
-        st.markdown("---")
-        date_range = st.slider("Historical Data (months)", 6, 36, 12, 6)
-        forecast_days = st.slider("Forecast Days", 1, 7, 3)
+        if data is None:
+            st.error("Failed to fetch data. Please try again later.")
+            st.stop()
     
-    # Initialize session state
-    if 'model' not in st.session_state:
-        st.session_state.model = None
-    if 'training_data' not in st.session_state:
-        st.session_state.training_data = None
+    # Calculate power output for all days
+    data['power_output'] = data.apply(
+        lambda row: calculate_power_output(
+            row['ALLSKY_SFC_SW_DWN'],
+            row['T2M'],
+            row['CLOUD_AMT'],
+            row['RH2M'],
+            row['WS2M']
+        ),
+        axis=1
+    )
     
-    # Main tabs
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "📊 Dashboard", "🤖 Train Model", "🔮 Forecasting", "📈 Analytics", "💰 Cost Analysis"
-    ])
+    data['daily_energy'] = data['power_output'] * 6  # 6 hours effective sunlight
+    data['pr_ratio'] = data.apply(
+        lambda row: calculate_pr_ratio(row['power_output'], row['ALLSKY_SFC_SW_DWN']),
+        axis=1
+    )
     
-    # ==================== TAB 1: DASHBOARD ====================
-    with tab1:
-        st.header("Real-Time Dashboard")
+    # Get latest data
+    latest = data.iloc[-1]
+    yesterday = data.iloc[-2] if len(data) > 1 else latest
+    
+    # Classify condition
+    condition, emoji, color = classify_condition(
+        latest['ALLSKY_SFC_SW_DWN'],
+        latest['CLOUD_AMT'],
+        latest.get('PRECTOTCORR', 0)
+    )
+    
+    # Calculate savings
+    avg_daily_energy = data['daily_energy'].tail(7).mean()
+    savings = calculate_savings(avg_daily_energy)
+    
+    # ==================== MAIN METRICS ====================
+    st.markdown("## 📊 Real-Time System Status")
+    
+    col1, col2, col3, col4, col5 = st.columns(5)
+    
+    with col1:
+        power_change = ((latest['power_output'] - yesterday['power_output']) / yesterday['power_output'] * 100) if yesterday['power_output'] > 0 else 0
+        st.metric(
+            "⚡ Current Power",
+            f"{latest['power_output']:.2f} kW",
+            f"{power_change:+.1f}%",
+            delta_color="normal"
+        )
+    
+    with col2:
+        st.metric(
+            "🔋 Daily Energy",
+            f"{latest['daily_energy']:.2f} kWh",
+            f"{(latest['power_output']/SYSTEM_CAPACITY)*100:.0f}% capacity"
+        )
+    
+    with col3:
+        st.metric(
+            "📊 Performance Ratio",
+            f"{latest['pr_ratio']:.1f}%",
+            "Excellent" if latest['pr_ratio'] > 80 else "Good" if latest['pr_ratio'] > 60 else "Fair"
+        )
+    
+    with col4:
+        st.metric(
+            "☀️ Solar Irradiance",
+            f"{latest['ALLSKY_SFC_SW_DWN']:.0f} W/m²",
+            f"{latest['CLOUD_AMT']:.0f}% clouds"
+        )
+    
+    with col5:
+        st.metric(
+            "🌡️ Temperature",
+            f"{latest['T2M']:.1f}°C",
+            f"{latest['RH2M']:.0f}% humidity"
+        )
+    
+    # Condition Badge
+    st.markdown(f"""
+        <div style="text-align: center; margin: 20px 0;">
+            <span class="status-badge" style="background-color: {color}; color: white;">
+                {emoji} {condition}
+            </span>
+        </div>
+    """, unsafe_allow_html=True)
+    
+    st.markdown("---")
+    
+    # ==================== ROW 1: GRAPHS ====================
+    st.markdown("## 📈 Power Generation & Weather Analysis")
+    
+    col_graph1, col_graph2 = st.columns(2)
+    
+    with col_graph1:
+        st.markdown("### ⚡ Today's Hourly Power Profile")
+        hourly_data = generate_hourly_profile(latest)
         
-        if st.button("🔄 Fetch Live Data", type="primary"):
-            with st.spinner("Fetching data from NASA POWER API..."):
-                end_date = datetime.now()
-                start_date = end_date - timedelta(days=7)
-                
-                live_data = fetch_nasa_power_data(BENGALURU_LAT, BENGALURU_LON, start_date, end_date)
-                
-                if live_data is not None:
-                    st.success("✅ Data fetched successfully!")
-                    
-                    latest = live_data.iloc[-1]
-                    
-                    col1, col2, col3, col4 = st.columns(4)
-                    
-                    with col1:
-                        st.metric("☀️ Irradiance", f"{latest['ALLSKY_SFC_SW_DWN']:.1f} W/m²")
-                    with col2:
-                        st.metric("🌡️ Temperature", f"{latest['T2M']:.1f}°C")
-                    with col3:
-                        st.metric("☁️ Cloud Cover", f"{latest['CLOUD_AMT']:.0f}%")
-                    with col4:
-                        st.metric("💧 Humidity", f"{latest['RH2M']:.0f}%")
-                    
-                    current_power = calculate_power_output(
-                        latest['ALLSKY_SFC_SW_DWN'],
-                        latest['T2M'],
-                        latest['CLOUD_AMT'],
-                        latest['RH2M']
-                    )
-                    
-                    daily_energy = current_power * 6
-                    
-                    condition, emoji = classify_condition(
-                        latest['ALLSKY_SFC_SW_DWN'],
-                        latest['CLOUD_AMT'],
-                        latest.get('PRECTOTCORR', 0)
-                    )
-                    
-                    col1, col2, col3 = st.columns(3)
-                    
-                    with col1:
-                        st.metric("⚡ Current Power Output", f"{current_power:.2f} kW",
-                                f"{(current_power/SYSTEM_CAPACITY)*100:.1f}% of capacity")
-                    with col2:
-                        st.metric("🔋 Daily Energy (Est.)", f"{daily_energy:.2f} kWh")
-                    with col3:
-                        pr = calculate_pr_ratio(daily_energy, latest['ALLSKY_SFC_SW_DWN'], SYSTEM_CAPACITY)
-                        st.metric("📊 Performance Ratio", f"{pr:.1f}%")
-                    
-                    st.markdown(f"### {emoji} Current Condition: **{condition}**")
-                    
-                    st.subheader("📈 7-Day Irradiance Trend")
-                    fig = go.Figure()
-                    fig.add_trace(go.Scatter(
-                        x=live_data.index,
-                        y=live_data['ALLSKY_SFC_SW_DWN'],
-                        mode='lines+markers',
-                        name='Solar Irradiance',
-                        line=dict(color='orange', width=3)
-                    ))
-                    fig.update_layout(xaxis_title="Date", yaxis_title="Irradiance (W/m²)", height=400)
-                    st.plotly_chart(fig, use_container_width=True)
+        fig1 = go.Figure()
+        fig1.add_trace(go.Scatter(
+            x=hourly_data['hour'],
+            y=hourly_data['power'],
+            mode='lines+markers',
+            name='Power Output',
+            fill='tozeroy',
+            line=dict(color='#F39C12', width=3),
+            marker=dict(size=8)
+        ))
+        fig1.add_hline(y=SYSTEM_CAPACITY, line_dash="dash", line_color="red", 
+                      annotation_text="Max Capacity")
+        fig1.update_layout(
+            xaxis_title="Hour of Day",
+            yaxis_title="Power Output (kW)",
+            height=350,
+            showlegend=False,
+            hovermode='x unified'
+        )
+        st.plotly_chart(fig1, use_container_width=True)
     
-    # ==================== TAB 2: TRAIN MODEL ====================
-    with tab2:
-        st.header("🤖 Train ML Model")
+    with col_graph2:
+        st.markdown("### ☀️ 30-Day Solar Irradiance Trend")
         
-        if st.button("🚀 Start Training", type="primary"):
-            with st.spinner("Fetching training data..."):
-                end_date = datetime.now()
-                start_date = end_date - timedelta(days=date_range * 30)
-                
-                training_data = fetch_nasa_power_data(BENGALURU_LAT, BENGALURU_LON, start_date, end_date)
-                
-                if training_data is not None:
-                    st.success(f"✅ Fetched {len(training_data)} days of data")
-                    
-                    training_data = engineer_features(training_data)
-                    training_data = generate_training_data(training_data)
-                    st.session_state.training_data = training_data
-                    
-                    with st.spinner("Training ML model..."):
-                        model = SolarPowerForecaster()
-                        metrics, X_test, y_test, y_pred = model.train(training_data)
-                        st.session_state.model = model
-                    
-                    st.success("✅ Model trained successfully!")
-                    
-                    col1, col2, col3, col4 = st.columns(4)
-                    with col1:
-                        st.metric("RMSE", f"{metrics['rmse']:.3f} kW")
-                    with col2:
-                        st.metric("MAE", f"{metrics['mae']:.3f} kW")
-                    with col3:
-                        st.metric("R² Score", f"{metrics['r2']:.3f}")
-                    with col4:
-                        st.metric("MAPE", f"{metrics['mape']:.2f}%")
-                    
-                    st.subheader("📊 Model Performance")
-                    fig = go.Figure()
-                    fig.add_trace(go.Scatter(x=X_test.index, y=y_test, mode='lines', name='Actual'))
-                    fig.add_trace(go.Scatter(x=X_test.index, y=y_pred, mode='lines', name='Predicted'))
-                    fig.update_layout(xaxis_title="Date", yaxis_title="Power (kW)", height=400)
-                    st.plotly_chart(fig, use_container_width=True)
-                    
-                    importance_df = model.get_feature_importance()
-                    fig = px.bar(importance_df.head(10), x='importance', y='feature', orientation='h')
-                    st.plotly_chart(fig, use_container_width=True)
+        fig2 = go.Figure()
+        fig2.add_trace(go.Scatter(
+            x=data.index,
+            y=data['ALLSKY_SFC_SW_DWN'],
+            mode='lines',
+            name='Irradiance',
+            fill='tozeroy',
+            line=dict(color='#E67E22', width=2)
+        ))
+        fig2.update_layout(
+            xaxis_title="Date",
+            yaxis_title="Irradiance (W/m²)",
+            height=350,
+            showlegend=False,
+            hovermode='x unified'
+        )
+        st.plotly_chart(fig2, use_container_width=True)
     
-    # ==================== TAB 3: FORECASTING ====================
-    with tab3:
-        st.header("🔮 Solar Power Forecasting")
-        
-        if st.session_state.model is None:
-            st.warning("⚠️ Please train the model first!")
-        else:
-            if st.button("📡 Generate Forecast", type="primary"):
-                with st.spinner("Generating forecast..."):
-                    end_date = datetime.now() + timedelta(days=forecast_days)
-                    start_date = datetime.now()
-                    
-                    forecast_data = fetch_nasa_power_data(BENGALURU_LAT, BENGALURU_LON, start_date, end_date)
-                    
-                    if forecast_data is not None:
-                        forecast_data = engineer_features(forecast_data)
-                        predictions = st.session_state.model.predict(forecast_data)
-                        forecast_data['predicted_power'] = predictions
-                        forecast_data['predicted_energy'] = predictions * 6
-                        
-                        st.success(f"✅ Generated {forecast_days}-day forecast")
-                        
-                        fig = go.Figure()
-                        fig.add_trace(go.Scatter(
-                            x=forecast_data.index,
-                            y=forecast_data['predicted_power'],
-                            mode='lines+markers',
-                            name='Predicted Power'
-                        ))
-                        fig.update_layout(xaxis_title="Date", yaxis_title="Power (kW)", height=400)
-                        st.plotly_chart(fig, use_container_width=True)
-                        
-                        st.dataframe(forecast_data[['ALLSKY_SFC_SW_DWN', 'T2M', 'CLOUD_AMT', 
-                                                    'predicted_power', 'predicted_energy']])
+    # ==================== ROW 2: MORE GRAPHS ====================
+    col_graph3, col_graph4 = st.columns(2)
     
-    # ==================== TAB 4: ANALYTICS ====================
-    with tab4:
-        st.header("📈 Performance Analytics")
+    with col_graph3:
+        st.markdown("### 🔋 30-Day Energy Production")
         
-        if st.session_state.training_data is not None:
-            data = st.session_state.training_data
-            
-            monthly_data = data.groupby(data.index.to_period('M')).agg({
-                'daily_energy': 'sum',
-                'power_output': 'mean'
-            })
-            monthly_data.index = monthly_data.index.to_timestamp()
-            
-            fig = go.Figure()
-            fig.add_trace(go.Bar(x=monthly_data.index, y=monthly_data['daily_energy'], name='Energy'))
-            fig.update_layout(xaxis_title="Month", yaxis_title="Energy (kWh)", height=400)
-            st.plotly_chart(fig, use_container_width=True)
+        fig3 = go.Figure()
+        fig3.add_trace(go.Bar(
+            x=data.index,
+            y=data['daily_energy'],
+            name='Daily Energy',
+            marker_color='#3498DB'
+        ))
+        fig3.add_hline(y=data['daily_energy'].mean(), line_dash="dash", 
+                      line_color="green", annotation_text="Average")
+        fig3.update_layout(
+            xaxis_title="Date",
+            yaxis_title="Energy (kWh)",
+            height=350,
+            showlegend=False
+        )
+        st.plotly_chart(fig3, use_container_width=True)
     
-    # ==================== TAB 5: COST ANALYSIS ====================
-    with tab5:
-        st.header("💰 Cost Analysis")
+    with col_graph4:
+        st.markdown("### 📊 Performance Ratio Trend")
         
-        if st.session_state.training_data is not None:
-            data = st.session_state.training_data
-            avg_daily = data['daily_energy'].mean()
-            
-            savings = calculate_savings(avg_daily)
-            
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Daily Savings", f"₹{savings['daily_savings']:.2f}")
-            with col2:
-                st.metric("Monthly Savings", f"₹{savings['monthly_savings']:.2f}")
-            with col3:
-                st.metric("Yearly Savings", f"₹{savings['yearly_savings']:.2f}")
-            
-            st.info(f"**Monthly Energy Production:** {savings['monthly_energy']:.2f} kWh")
-            
-            st.subheader("BESCOM Tariff Structure")
-            tariff_df = pd.DataFrame([
-                {"Slab": "0-50 units", "Rate (₹/kWh)": 4.15},
-                {"Slab": "51-100 units", "Rate (₹/kWh)": 5.75},
-                {"Slab": "101-200 units", "Rate (₹/kWh)": 7.60},
-                {"Slab": "Above 200 units", "Rate (₹/kWh)": 8.75}
-            ])
-            st.table(tariff_df)
+        fig4 = go.Figure()
+        fig4.add_trace(go.Scatter(
+            x=data.index,
+            y=data['pr_ratio'],
+            mode='lines+markers',
+            name='PR Ratio',
+            line=dict(color='#9B59B6', width=2),
+            marker=dict(size=6)
+        ))
+        fig4.add_hline(y=75, line_dash="dash", line_color="orange", 
+                      annotation_text="Target: 75%")
+        fig4.update_layout(
+            xaxis_title="Date",
+            yaxis_title="PR Ratio (%)",
+            height=350,
+            showlegend=False,
+            hovermode='x unified'
+        )
+        st.plotly_chart(fig4, use_container_width=True)
+    
+    st.markdown("---")
+    
+    # ==================== ROW 3: WEATHER & COST ====================
+    col_left, col_right = st.columns([1, 1])
+    
+    with col_left:
+        st.markdown("## 🌦️ Current Weather Conditions")
+        
+        weather_cols = st.columns(3)
+        
+        with weather_cols[0]:
+            st.markdown(f"""
+            <div class="metric-box" style="background: linear-gradient(135deg, #E67E22 0%, #E74C3C 100%);">
+                <div class="metric-value">{latest['T2M']:.1f}°C</div>
+                <div class="metric-label">🌡️ Temperature</div>
+                <div style="font-size: 0.8rem; margin-top: 5px;">
+                    Max: {latest['T2M_MAX']:.1f}°C | Min: {latest['T2M_MIN']:.1f}°C
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with weather_cols[1]:
+            st.markdown(f"""
+            <div class="metric-box" style="background: linear-gradient(135deg, #3498DB 0%, #2980B9 100%);">
+                <div class="metric-value">{latest['RH2M']:.0f}%</div>
+                <div class="metric-label">💧 Humidity</div>
+                <div style="font-size: 0.8rem; margin-top: 5px;">
+                    Wind: {latest['WS2M']:.1f} m/s
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with weather_cols[2]:
+            st.markdown(f"""
+            <div class="metric-box" style="background: linear-gradient(135deg, #95A5A6 0%, #7F8C8D 100%);">
+                <div class="metric-value">{latest['CLOUD_AMT']:.0f}%</div>
+                <div class="metric-label">☁️ Cloud Cover</div>
+                <div style="font-size: 0.8rem; margin-top: 5px;">
+                    Precip: {latest.get('PRECTOTCORR', 0):.1f} mm
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        st.markdown("<br>", unsafe_allow_html=True)
+        
+        # Weather impact chart
+        st.markdown("### 🌤️ Weather Impact on Performance")
+        
+        fig5 = go.Figure()
+        fig5.add_trace(go.Scatter(
+            x=data['CLOUD_AMT'],
+            y=data['power_output'],
+            mode='markers',
+            marker=dict(
+                size=10,
+                color=data['T2M'],
+                colorscale='RdYlBu_r',
+                showscale=True,
+                colorbar=dict(title="Temp (°C)")
+            ),
+            text=data.index.strftime('%Y-%m-%d'),
+            hovertemplate='<b>%{text}</b><br>Cloud: %{x:.0f}%<br>Power: %{y:.2f} kW<extra></extra>'
+        ))
+        fig5.update_layout(
+            xaxis_title="Cloud Cover (%)",
+            yaxis_title="Power Output (kW)",
+            height=300
+        )
+        st.plotly_chart(fig5, use_container_width=True)
+    
+    with col_right:
+        st.markdown("## 💰 Cost Savings Analysis (BESCOM Tariff)")
+        
+        savings_cols = st.columns(3)
+        
+        with savings_cols[0]:
+            st.markdown(f"""
+            <div class="metric-box" style="background: linear-gradient(135deg, #27AE60 0%, #229954 100%);">
+                <div class="metric-value">₹{savings['daily_savings']:.2f}</div>
+                <div class="metric-label">💵 Daily Savings</div>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with savings_cols[1]:
+            st.markdown(f"""
+            <div class="metric-box" style="background: linear-gradient(135deg, #16A085 0%, #138D75 100%);">
+                <div class="metric-value">₹{savings['monthly_savings']:.2f}</div>
+                <div class="metric-label">📅 Monthly Savings</div>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with savings_cols[2]:
+            st.markdown(f"""
+            <div class="metric-box" style="background: linear-gradient(135deg, #D4AC0D 0%, #B7950B 100%);">
+                <div class="metric-value">₹{savings['yearly_savings']:.2f}</div>
+                <div class="metric-label">📆 Yearly Savings</div>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        st.markdown("<br>", unsafe_allow_html=True)
+        
+        # BESCOM Tariff Table
+        st.markdown("### 📋 BESCOM Residential Tariff (2024-25)")
+        
+        tariff_df = pd.DataFrame([
+            {"Slab": "0 - 50 units", "Rate (₹/kWh)": "4.15", "Monthly Cost": f"₹{50 * 4.15:.2f}"},
+            {"Slab": "51 - 100 units", "Rate (₹/kWh)": "5.75", "Monthly Cost": f"₹{50 * 5.75:.2f}"},
+            {"Slab": "101 - 200 units", "Rate (₹/kWh)": "7.60", "Monthly Cost": f"₹{100 * 7.60:.2f}"},
+            {"Slab": "Above 200 units", "Rate (₹/kWh)": "8.75", "Monthly Cost": "Variable"}
+        ])
+        
+        st.dataframe(tariff_df, use_container_width=True, hide_index=True)
+        
+        st.info(f"""
+        **💡 Your Energy Stats:**
+        - Monthly Production: **{savings['monthly_energy']:.2f} kWh**
+        - Yearly Production: **{savings['yearly_energy']:.2f} kWh**
+        - CO₂ Offset: **{savings['yearly_energy'] * 0.82:.2f} kg/year**
+        - Trees Equivalent: **{(savings['yearly_energy'] * 0.82) / 21:.0f} trees/year**
+        """)
+    
+    st.markdown("---")
+    
+    # ==================== SYSTEM INFO ====================
+    st.markdown("## ⚙️ System Configuration & Statistics")
+    
+    info_col1, info_col2, info_col3, info_col4 = st.columns(4)
+    
+    with info_col1:
+        st.markdown("""
+        **📍 Location**
+        - Latitude: 12.9716°N
+        - Longitude: 77.5946°E
+        - City: Bengaluru
+        """)
+    
+    with info_col2:
+        st.markdown(f"""
+        **⚡ System Specs**
+        - Capacity: {SYSTEM_CAPACITY} kW
+        - Efficiency: {SYSTEM_EFFICIENCY * 100}%
+        - Panel Area: {PANEL_AREA} m²
+        """)
+    
+    with info_col3:
+        avg_power = data['power_output'].tail(7).mean()
+        max_power = data['power_output'].max()
+        st.markdown(f"""
+        **📊 7-Day Stats**
+        - Avg Power: {avg_power:.2f} kW
+        - Max Power: {max_power:.2f} kW
+        - Avg PR: {data['pr_ratio'].tail(7).mean():.1f}%
+        """)
+    
+    with info_col4:
+        total_energy_30d = data['daily_energy'].sum()
+        st.markdown(f"""
+        **🔋 30-Day Total**
+        - Energy: {total_energy_30d:.2f} kWh
+        - Savings: ₹{total_energy_30d * 6.5:.2f}
+        - Capacity Factor: {(total_energy_30d / (SYSTEM_CAPACITY * 24 * 30)) * 100:.1f}%
+        """)
+    
+    # Footer
+    st.markdown("---")
+    st.markdown(f"""
+    <div style="text-align: center; color: #7f8c8d; font-size: 0.9rem;">
+        🕐 Last Updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | 
+        📡 Data Source: NASA POWER API | 
+        💚 Powered by Streamlit
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Auto-refresh
+    if auto_refresh:
+        time.sleep(30)
+        st.rerun()
 
 if __name__ == "__main__":
     main()
