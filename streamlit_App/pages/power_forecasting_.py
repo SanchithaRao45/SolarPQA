@@ -315,12 +315,7 @@ def calculate_savings(daily_energy_kwh):
     }
 
 # ==================== STREAMLIT APP ====================
-def main():
-    st.set_page_config(
-        page_title="Solar Power Forecasting System",
-        page_icon="☀️",
-        layout="wide"
-    )
+
     
     # Custom CSS
     st.markdown("""
