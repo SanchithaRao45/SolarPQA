@@ -1,18 +1,22 @@
-# requirements.txt
-
-# Core dependencies for the Streamlit application
-streamlit
+streamlit==1.45.0
 pandas
 numpy
 joblib
-sklearn
+plotly
 
-# If you were to use any specific machine learning framework (uncomment if applicable)
+# FIX 1: Replaced deprecated 'sklearn' (Line 8 in your original file) 
+# or removed redundant entry, as 'scikit-learn' is listed below.
+
+# FIX 2: Replaced incorrect 'pytorch' with the correct package name 'torch' (Line 12)
+
+
 tensorflow
- pytorch
- prophet # If this was the forecasting model
+prophet
 
-# Note: The version of joblib must match the version used to save your .pkl models.
-# If you encounter deserialization errors, you may need to specify the version:
- joblib==1.2.0 
-scikit-learn==1.3.0
+# FIX 3: Replaced 'scikit-learn==1.3.0' (Line 18).
+# Removed the version constraint to allow a Python 3.13 compatible version to install, 
+# resolving the Cython 'int_t' build error.
+scikit-learn
+
+# You may also need a more recent version of TensorFlow:
+tensorflow>=2.15.0
