@@ -272,12 +272,7 @@ def load_or_generate_historical_data():
 # STREAMLIT UI
 # ============================================================================
 
-st.set_page_config(
-    page_title="Solar Rooftop Power Forecaster",
-    page_icon="☀",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+
 
 # CSS
 st.markdown("""
