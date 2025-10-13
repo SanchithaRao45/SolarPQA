@@ -8,9 +8,9 @@ import os
 # --- I. GLOBAL CONFIGURATION, UTILITIES, and THRESHOLDS (IEEE 519 Compliance) ---
 
 # Standards-based RUL Endpoints
-VTHD_CRITICAL_THRESHOLD = 5.0    # IEEE 519 Standard for VTHD <= 69 kV (Safety)
-ITHD_CRITICAL_THRESHOLD = 15.0   # Conservative limit for inverter component health
-PF_CRITICAL_THRESHOLD = 0.85     # Common utility penalty threshold
+VTHD_CRITICAL_THRESHOLD = 5.0 # IEEE 519 Standard for VTHD <= 69 kV (Safety)
+ITHD_CRITICAL_THRESHOLD = 15.0 # Conservative limit for inverter component health
+PF_CRITICAL_THRESHOLD = 0.85 # Common utility penalty threshold
 
 # RCA Rules and Mappings
 RCA_RULES = {
@@ -175,7 +175,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS for modern design (removed emojis)
+# Custom CSS for modern design
 st.markdown("""
 <style>
     /* Main title styling */
@@ -224,6 +224,31 @@ st.markdown("""
         background: #f8d7da;
         color: #721c24;
     }
+    
+    /* --- NEW Priority Box Styling --- */
+    .priority-box {
+        padding: 1.5rem;
+        border-radius: 10px;
+        text-align: center;
+        color: white; /* Default text color for boxes */
+    }
+
+    .priority-Urgent, .priority-High {
+        background: linear-gradient(135deg, #cc0000 0%, #ff416c 100%); /* Red/Critical */
+        box-shadow: 0 4px 10px rgba(255, 0, 0, 0.3);
+    }
+
+    .priority-Medium {
+        background: linear-gradient(135deg, #ffc107 0%, #ffc837 100%); /* Yellow/Warning */
+        box-shadow: 0 4px 10px rgba(255, 193, 7, 0.3);
+        color: #333; /* Darker text for better contrast */
+    }
+
+    .priority-Low {
+        background: linear-gradient(135deg, #28a745 0%, #218838 100%); /* Green/Normal */
+        box-shadow: 0 4px 10px rgba(40, 167, 69, 0.3);
+    }
+    /* --- END NEW Priority Box Styling --- */
 
     /* Metric styling */
     [data-testid="stMetricValue"] {
@@ -310,11 +335,12 @@ st.markdown('<div class="section-header">Root Cause Analysis - Immediate Diagnos
 
 rca_main, rca_side = st.columns([2, 1])
 
-with rca_main:
-    diagnosis = report['rca_diagnosis']
-    action = ACTION_MAPPING.get(diagnosis, "No specific action defined.")
-    priority = PRIORITY_MAPPING.get(diagnosis, "Normal")
+diagnosis = report['rca_diagnosis']
+action = ACTION_MAPPING.get(diagnosis, "No specific action defined.")
+priority = PRIORITY_MAPPING.get(diagnosis, "Normal")
 
+with rca_main:
+    
     if diagnosis == 'Normal Operation':
         st.markdown(f'<div class="status-badge status-normal">Status: {diagnosis}</div>', unsafe_allow_html=True)
     elif priority == 'Urgent' or priority == 'High':
@@ -325,9 +351,11 @@ with rca_main:
     st.markdown(f"**Recommended Action:** {action}")
 
 with rca_side:
+    # --- DYNAMICALLY ASSIGN CLASS FOR COLORING ---
+    priority_class = f"priority-{priority}"
+    
     st.markdown(f"""
-    <div style='background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                color: white; padding: 1.5rem; border-radius: 10px; text-align: center;'>
+    <div class='priority-box {priority_class}'>
         <div style='font-size: 0.9rem; opacity: 0.9;'>Priority Level</div>
         <div style='font-size: 2rem; font-weight: bold; margin-top: 0.5rem;'>{priority}</div>
     </div>
