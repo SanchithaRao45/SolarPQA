@@ -6,8 +6,8 @@ from email.mime.multipart import MIMEMultipart
 # NOTE: Replace these placeholders with your actual, secured credentials.
 SMTP_SERVER = "smtp.gmail.com"  
 SMTP_PORT = 587                  
-SENDER_EMAIL = "your.solar.system.email@gmail.com"  # Your sending Gmail address
-SMTP_PASSWORD = "YOUR_16_CHARACTER_APP_PASSWORD"    # The Google App Password
+SENDER_EMAIL = "sanchrao22@gmail.com"  # Your sending Gmail address
+SMTP_PASSWORD = "hvfk bwrh mpyl slrc"    # The Google App Password
 # -------------------------------------------------------------------------
 
 def send_alert_email(recipient_email, subject, body_html):
