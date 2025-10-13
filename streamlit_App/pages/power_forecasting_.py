@@ -272,8 +272,6 @@ def load_or_generate_historical_data():
 # STREAMLIT UI
 # ============================================================================
 
-
-
 # CSS
 st.markdown("""
 <style>
@@ -939,7 +937,33 @@ with health_col2:
     else:
         st.success("✅ All systems operating within normal parameters")
 
+# ============================================================================
+# ENVIRONMENTAL BENEFITS
+# ============================================================================
 
+st.markdown('<div class="section-header">🌱 Environmental Benefits</div>', unsafe_allow_html=True)
+
+# Calculate CO2 saved and equivalent trees planted
+CO2_SAVED_KG = metrics['total_energy_7d'] * 0.82  # kg CO2 per kWh
+TREES_EQUIVALENT = CO2_SAVED_KG / 21.77
+
+col_env1, col_env2 = st.columns(2)
+
+with col_env1:
+    st.metric(
+        "CO₂ Emissions Saved",
+        f"{CO2_SAVED_KG:.1f} kg",
+        delta=None
+    )
+
+with col_env2:
+    st.metric(
+        "Equivalent Trees Planted",
+        f"{TREES_EQUIVALENT:.1f}",
+        delta=None
+    )
+
+st.caption("Estimates based on Indian grid average (0.82 kg CO₂/kWh) and annual absorption per tree (~21.77 kg CO₂/tree/year).")
 
 # ============================================================================
 # EXPORT DATA
@@ -995,30 +1019,3 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-# ============================================================================
-# ENVIRONMENTAL BENEFITS
-# ============================================================================
-
-st.markdown('<div class="section-header">🌱 Environmental Benefits</div>', unsafe_allow_html=True)
-
-# Calculate CO2 saved and equivalent trees planted
-CO2_SAVED_KG = metrics['total_energy_7d'] * 0.82  # kg CO2 per kWh
-TREES_EQUIVALENT = CO2_SAVED_KG / 21.77
-
-col_env1, col_env2 = st.columns(2)
-
-with col_env1:
-    st.metric(
-        "CO₂ Emissions Saved",
-        f"{CO2_SAVED_KG:.1f} kg",
-        delta=None
-    )
-
-with col_env2:
-    st.metric(
-        "Equivalent Trees Planted",
-        f"{TREES_EQUIVALENT:.1f}",
-        delta=None
-    )
-
-st.caption("Estimates based on Indian grid average (0.82 kg CO₂/kWh) and annual absorption per tree (~21.77 kg CO₂/tree/year).")
