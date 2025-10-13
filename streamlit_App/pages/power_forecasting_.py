@@ -547,7 +547,7 @@ with col_table:
 # WEATHER IMPACT COMPARISON
 # ============================================================================
 
-st.markdown('<div class="section-header">🌤 Weather Condition Impact Analysis</div>', unsafe_allow_html=True)
+st.markdown('<div class="section-header">  Weather Condition Impact Analysis</div>', unsafe_allow_html=True)
 
 st.info(f"*Current Forecast:* {weather_condition} conditions for the next 7 days")
 
@@ -606,9 +606,9 @@ st.dataframe(comparison_display, use_container_width=True, hide_index=True)
 # ENVIRONMENTAL CONDITIONS FORECAST
 # ============================================================================
 
-st.markdown('<div class="section-header">🌡 Environmental Conditions Forecast</div>', unsafe_allow_html=True)
+st.markdown('<div class="section-header">  Environmental Conditions Forecast</div>', unsafe_allow_html=True)
 
-tab1, tab2, tab3 = st.tabs(["☀ Solar Irradiance", "🌡 Temperature", " Combined Analysis"])
+tab1, tab2, tab3 = st.tabs(["☀ Solar Irradiance", " Temperature", " Combined Analysis"])
 
 with tab1:
     fig_irr = go.Figure()
@@ -923,13 +923,13 @@ with health_col2:
 
     recommendations = []
     if pr_percentage < 75:
-        recommendations.append("• Clean solar panels - possible soiling detected")
+        recommendations.append(" Clean solar panels - possible soiling detected")
     if peak_achievement < 80:
-        recommendations.append("• Check for shading or panel degradation")
+        recommendations.append(" Check for shading or panel degradation")
     if max_panel_temp > 65:
-        recommendations.append("• Improve panel ventilation")
+        recommendations.append(" Improve panel ventilation")
     if daily_cv > 25:
-        recommendations.append("• Investigate weather-related losses")
+        recommendations.append(" Investigate weather-related losses")
     if weather_condition == "Rainy":
         recommendations.append("• Good time for natural panel cleaning!")
 
