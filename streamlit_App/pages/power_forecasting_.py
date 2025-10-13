@@ -424,7 +424,7 @@ with col5:
 # HOURLY POWER FORECAST CHART
 # ============================================================================
 
-st.markdown('<div class="section-header">⚡ Hour-by-Hour Power Forecast (7 Days)</div>', unsafe_allow_html=True)
+st.markdown('<div class="section-header">  Hour-by-Hour Power Forecast (7 Days)</div>', unsafe_allow_html=True)
 
 fig_hourly = go.Figure()
 
@@ -937,7 +937,7 @@ with health_col2:
         for rec in recommendations:
             st.warning(rec)
     else:
-        st.success("✅ All systems operating within normal parameters")
+        st.success(" All systems operating within normal parameters")
 
 
 
