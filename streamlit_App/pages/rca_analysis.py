@@ -168,12 +168,6 @@ def generate_placeholder_data(key_metric):
 
 # --- V. STREAMLIT UI CONFIGURATION ---
 
-st.set_page_config(
-    page_title="Solar System Health Monitor",
-    page_icon="🤖",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
 
 # Custom CSS for modern design
 st.markdown("""
