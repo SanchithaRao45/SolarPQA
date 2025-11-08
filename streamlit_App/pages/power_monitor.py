@@ -4,104 +4,108 @@ import numpy as np
 import plotly.graph_objects as go
 from datetime import datetime
 import time
+import math
 
+# ----------------------------------------
 # Page setup
-st.set_page_config(page_title="Single-Phase Power Quality Analyzer", layout="wide", page_icon="⚡")
+# ----------------------------------------
+st.set_page_config(page_title="Manual Power Quality Analyzer", layout="wide", page_icon="💡")
 
-# Initialize session state
-if 'data_history' not in st.session_state:
-    st.session_state.data_history = []
-if 'load_state' not in st.session_state:
-    st.session_state.load_state = "Load 1"
-
-# ===================================
-# Simulated Real-time Data Function
-# ===================================
-def get_current_readings():
-    base_voltage = 230.0
-    base_current = 10.0
-    base_pf = 0.9
-    base_freq = 50.0
-
-    variation = np.random.uniform(-0.03, 0.03)
-    load_factor = {"Load 1": 1.0, "Load 2": 1.5, "Load 3": 0.7}[st.session_state.load_state]
-
-    voltage = base_voltage * (1 + variation) * load_factor
-    current = base_current * (1 + variation) * load_factor
-    pf = np.clip(base_pf + variation, 0.7, 1.0)
-    freq = base_freq + variation * 0.2
-
-    power_W = voltage * current * pf
-    apparent_power_VA = voltage * current
-    reactive_power_VAR = np.sqrt(max(apparent_power_VA**2 - power_W**2, 0))
-    vthd = np.clip(2.5 + variation * 2, 0, 8)
-    ithd = np.clip(4.0 + variation * 3, 0, 12)
-    wh = power_W * 0.002  # Simulated Wh increment
-
-    return {
-        "timestamp": datetime.now(),
-        "Voltage (V)": voltage,
-        "Current (A)": current,
-        "Power (W)": power_W,
-        "Reactive (VAR)": reactive_power_VAR,
-        "Apparent (VA)": apparent_power_VA,
-        "Power Factor": pf,
-        "Frequency (Hz)": freq,
-        "ITHD (%)": ithd,
-        "VTHD (%)": vthd,
-        "Energy (Wh)": wh
+# ----------------------------------------
+# Base readings from your sheet
+# ----------------------------------------
+base_data = {
+    "Bulb 60W": {
+        "Voltage (V)": 220.4, "Current (A)": 0.2639, "Power (W)": 58.20,
+        "Reactive (VAR)": -0.832, "Apparent (VA)": 58.07, "Power Factor": 1.000,
+        "Frequency (Hz)": 50.35, "ITHD (%)": 2.101, "VTHD (%)": 1.914, "Energy (Wh)": 0.049
+    },
+    "Bulb 15W (LED)": {
+        "Voltage (V)": 219.1, "Current (A)": 0.0258, "Power (W)": 5.280,
+        "Reactive (VAR)": -1.999, "Apparent (VA)": 5.625, "Power Factor": 0.934,
+        "Frequency (Hz)": 50.35, "ITHD (%)": 5.048, "VTHD (%)": 0.642, "Energy (Wh)": 0.049
+    },
+    "Phone Charger (45W)": {
+        "Voltage (V)": 219.9, "Current (A)": 0.1985, "Power (W)": 27.71,
+        "Reactive (VAR)": -3.852, "Apparent (VA)": 44.34, "Power Factor": 0.631,
+        "Frequency (Hz)": 50.35, "ITHD (%)": 17.4, "VTHD (%)": 1.905, "Energy (Wh)": 0.050
+    },
+    "Bulb 9W (LED)": {
+        "Voltage (V)": 218.9, "Current (A)": 0.0331, "Power (W)": 7.232,
+        "Reactive (VAR)": -0.282, "Apparent (VA)": 7.299, "Power Factor": 0.995,
+        "Frequency (Hz)": 50.35, "ITHD (%)": 10.59, "VTHD (%)": 0.767, "Energy (Wh)": 0.050
     }
+}
 
-# ===================================
-# Sidebar Controls
-# ===================================
+# ----------------------------------------
+# Initialize state
+# ----------------------------------------
+if "data_history" not in st.session_state:
+    st.session_state.data_history = []
+if "load_state" not in st.session_state:
+    st.session_state.load_state = "Bulb 60W"
+if "cycle_index" not in st.session_state:
+    st.session_state.cycle_index = 0
+
+# ----------------------------------------
+# Sidebar controls
+# ----------------------------------------
 with st.sidebar:
-    st.header("⚙️ Controls")
-    st.subheader("Load Selection")
-
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        if st.button("Load 1", use_container_width=True):
-            st.session_state.load_state = "Load 1"
-            st.rerun()
-    with col2:
-        if st.button("Load 2", use_container_width=True):
-            st.session_state.load_state = "Load 2"
-            st.rerun()
-    with col3:
-        if st.button("Load 3", use_container_width=True):
-            st.session_state.load_state = "Load 3"
+    st.header("⚙️ Load Selection")
+    for load_name in base_data.keys():
+        if st.button(load_name, use_container_width=True):
+            st.session_state.load_state = load_name
+            st.session_state.data_history = []  # reset data on load change
             st.rerun()
 
     st.info(f"Current Load: **{st.session_state.load_state}**")
+    st.caption("Auto-updating every 10 seconds")
     st.divider()
 
-    history_length = st.slider("History Length (points)", 10, 200, 100)
-    st.caption("Auto refresh every 10 seconds")
+# ----------------------------------------
+# Generate smooth cyclic fluctuation
+# ----------------------------------------
+def get_cyclic_readings(load_name, cycle_index):
+    base = base_data[load_name]
+    t = cycle_index / 10  # time step
+    fluctuation = 0.4 * math.sin(t)  # smooth cyclic +/-0.4 variation
 
-# ===================================
-# Data Acquisition
-# ===================================
-data = get_current_readings()
+    readings = {}
+    for key, val in base.items():
+        if "Voltage" in key:
+            readings[key] = np.clip(219 + 0.5 * math.sin(t), 218, 220)
+        elif isinstance(val, (int, float)):
+            readings[key] = val + val * fluctuation * 0.01  # ~±0.4%
+        else:
+            readings[key] = val
+
+    readings["timestamp"] = datetime.now()
+    return readings
+
+# ----------------------------------------
+# Collect readings
+# ----------------------------------------
+st.session_state.cycle_index += 1
+data = get_cyclic_readings(st.session_state.load_state, st.session_state.cycle_index)
 st.session_state.data_history.append(data)
-if len(st.session_state.data_history) > history_length:
-    st.session_state.data_history = st.session_state.data_history[-history_length:]
+if len(st.session_state.data_history) > 100:
+    st.session_state.data_history = st.session_state.data_history[-100:]
 
 df = pd.DataFrame(st.session_state.data_history)
 
-# ===================================
-# Display Current Table
-# ===================================
-st.title("⚡ Single-Phase Power Quality Analyzer")
-st.markdown("### Real-time Monitoring of All Electrical Parameters")
+# ----------------------------------------
+# Display table
+# ----------------------------------------
+st.title("💡 Manual Power Quality Analyzer")
+st.markdown("### Real Readings with Cyclic Variations (±0.4%)")
 
 st.subheader("📋 Current Readings")
-st.table(df.tail(1).style.format("{:.2f}"))
+st.table(df.tail(1).style.format("{:.3f}"))
 
-# ===================================
-# Graphs for All 10 Parameters
-# ===================================
-st.header("📈 Real-time Graphs (Updates Every 10s)")
+# ----------------------------------------
+# Graph section for all parameters
+# ----------------------------------------
+st.header("📈 Graphs for All 10 Parameters (Auto-update every 10 s)")
 
 graph_params = [
     "Voltage (V)", "Current (A)", "Power (W)", "Reactive (VAR)",
@@ -122,8 +126,8 @@ for param in graph_params:
     )
     st.plotly_chart(fig, use_container_width=True)
 
-# ===================================
-# Auto Refresh (Every 10 seconds)
-# ===================================
+# ----------------------------------------
+# Auto-refresh every 10 s
+# ----------------------------------------
 time.sleep(10)
 st.rerun()
