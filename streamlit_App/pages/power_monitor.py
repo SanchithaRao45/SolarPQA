@@ -51,7 +51,7 @@ if "cycle_index" not in st.session_state:
 # Sidebar controls
 # ----------------------------------------
 with st.sidebar:
-    st.header("⚙️ Load Selection")
+    st.header(" Load Selection")
     for load_name in base_data.keys():
         if st.button(load_name, use_container_width=True):
             st.session_state.load_state = load_name
@@ -96,16 +96,16 @@ df = pd.DataFrame(st.session_state.data_history)
 # ----------------------------------------
 # Display table
 # ----------------------------------------
-st.title("💡 Manual Power Quality Analyzer")
-st.markdown("### Real Readings with Cyclic Variations (±0.4%)")
+st.title("  Power Quality Analyzer")
 
-st.subheader("📋 Current Readings")
+
+st.subheader(" Current Readings")
 st.table(df.tail(1).style.format("{:.3f}"))
 
 # ----------------------------------------
 # Graph section for all parameters
 # ----------------------------------------
-st.header("📈 Graphs for All 10 Parameters (Auto-update every 10 s)")
+st.header(" Graphs  (Auto-update every 10 s)")
 
 graph_params = [
     "Voltage (V)", "Current (A)", "Power (W)", "Reactive (VAR)",
