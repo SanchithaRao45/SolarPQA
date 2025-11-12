@@ -9,7 +9,7 @@ import math
 # -------------------------------------------------
 # Page setup
 # -------------------------------------------------
-st.set_page_config(page_title="Manual Power Quality Analyzer", layout="wide", page_icon="💡")
+st.set_page_config(page_title="Manual Power Quality Analyzer", layout="wide", page_icon="")
 
 # -------------------------------------------------
 # Base readings (from your measurements)
@@ -48,7 +48,7 @@ if "load_state" not in st.session_state:
 # Sidebar
 # -------------------------------------------------
 with st.sidebar:
-    st.header("⚙️ Load Selection")
+    st.header(" Load Selection")
     for load_name in base_data.keys():
         if st.button(load_name, use_container_width=True):
             st.session_state.load_state = load_name
@@ -122,15 +122,15 @@ if len(st.session_state.event_log) > 50:
 # -------------------------------------------------
 # Display current readings
 # -------------------------------------------------
-st.title("💡 Manual Power Quality Analyzer with RCA & Event Log")
+st.title(" Manual Power Quality Analyzer with RCA & Event Log")
 
-st.subheader("📋 Current Readings")
+st.subheader(" Current Readings")
 st.table(df.tail(1).style.format("{:.3f}"))
 
 # -------------------------------------------------
 # Graphs (10 parameters)
 # -------------------------------------------------
-st.header("📈 Real-time Graphs (auto-update 10 s)")
+st.header(" Real-time Graphs (auto-update 10 s)")
 params = [
     "Voltage (V)", "Current (A)", "Power (W)", "Reactive (VAR)",
     "Apparent (VA)", "Power Factor", "Frequency (Hz)",
@@ -146,12 +146,12 @@ for p in params:
 # -------------------------------------------------
 # Event log + CSV download
 # -------------------------------------------------
-st.header("🧾 Event Log — Root Cause Analysis")
+st.header(" Event Log — Root Cause Analysis")
 elog_df = pd.DataFrame(st.session_state.event_log)
 st.dataframe(elog_df, use_container_width=True)
 
 csv = elog_df.to_csv(index=False).encode("utf-8")
-st.download_button("⬇️ Download Event Log CSV", csv, "event_log.csv", "text/csv")
+st.download_button(" Download Event Log CSV", csv, "event_log.csv", "text/csv")
 
 # -------------------------------------------------
 # Auto-refresh every 10 s
