@@ -9,7 +9,7 @@ import math
 # -------------------------------------------------
 # Page setup
 # -------------------------------------------------
-st.set_page_config(page_title="Manual Power Quality Analyzer", layout="wide", page_icon="")
+st.set_page_config(page_title=" Power Quality Analyzer", layout="wide", page_icon="")
 
 # -------------------------------------------------
 # Base readings (from your measurements)
@@ -122,7 +122,7 @@ if len(st.session_state.event_log) > 50:
 # -------------------------------------------------
 # Display current readings
 # -------------------------------------------------
-st.title(" Manual Power Quality Analyzer with RCA & Event Log")
+st.title("  Power Quality Analyzer with RCA and Event Log")
 
 st.subheader(" Current Readings")
 st.table(df.tail(1).style.format("{:.3f}"))
